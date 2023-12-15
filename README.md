@@ -178,4 +178,4 @@ RENEWED certificate list cleared in config file: /etc/ipa/cert_email/your-servic
 
 ## Don't forget
 
-Whoever you're sending the certificate to, will also need the private key. The private key doesn't typically change very often, so it's better to send that manually, preferably encrypted.
+Whoever you're sending the certificate to, will also need the private key(s). Private keys don't typically change very often, so it's better to send them manually, preferably encrypted.
