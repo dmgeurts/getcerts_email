@@ -21,15 +21,15 @@ show_conf() {
 cat << EOF
 Example configuration file:
 
-  # Email certificates to (space separated bash array)
+  # Email certificates to (space-delimited array)
   TO=(name1@domain.com name2@domain.com)
   # Email body header and footer in printf format.
   BODY_HEADER="Dear Recipient,\n\nPlease replace the certificate(s) on the following devices:\n"
   BODY_FOOTER="\n-- \nRegards,\nSender"
   SENDER="Admin <admin@domain.com>"
-  # Obligatory: List certs as a space delimited array.
+  # Obligatory: List certs as a space-delimited array.
   CERTS=(a.domain.com b.domain.com c.domain.com)
-  # Certificates renewed and ready for emailing. Will be added if missing.
+  # Certificates renewed and ready for emailing.
   # Can be used to selectively send certificates by manually editing the array.
   RENEWED=()
 EOF
