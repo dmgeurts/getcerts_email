@@ -12,9 +12,11 @@
 #
 # When run manually, the email can be sent containing all certificates irrespective
 # of the certificates flagged for sending in the configuration file.
-# 
+#
 # A cronjob should be used to email the certificates together rather than individually.
 # The cronjob frequency will dictate when certificates will be sent.
+#
+# If pkcs12 certs need to be emailed out, then please use the -p flag.
 
 ## Help for config file format
 show_conf() {
@@ -42,15 +44,16 @@ CERT_PATH="/etc/ssl/certs"
 ## Usage info
 show_help() {
 cat << EOF
-Usage: ${0##*/} [-h -c <CERT_CN> -s -a -q] <config file>
+Usage: ${0##*/} [-hsaq -c <CERT_CN> -p <password>] <config file>
 This script flags certificates issued by ipa-getcert for emailing out.
 
     <config file>   Configuration file. If no path is given, $CNF_PATH will be assumed.
-    -c <CERT_CN>    (cn)    Certificate Common Name.
-    -s              (send)  Send email(s).
-    -a              (all)   Send all certificates.
-    -q              (quiet) Don't complain about no renewed certificates, useful for cronjobs.
-    -h              (help)  Display this help and exit.
+    -c <CERT_CN>    (cn)     Certificate Common Name.
+    -s              (send)   Send email(s).
+    -a              (all)    Send all certificates.
+    -p <password>   (pkcs12) Send certs in pkcs12 format.
+    -q              (quiet)  Don't complain about no renewed certificates, useful for cronjobs.
+    -h              (help)   Display this help and exit.
 EOF
 }
 
@@ -59,13 +62,20 @@ CERTS=()
 OPTIND=1
 
 ## Read/interpret optional arguments
-while getopts c:saqh opt; do
+while getopts c:saqhp: opt; do
     case $opt in
         c)  CN=$OPTARG
             ;;
         s)  SEND="yes"
             ;;
         a)  ALL="yes"
+            ;;
+        p)  if [ -z "$OPTARG" ]; then
+                echo "ERROR: no PKCS password provided."
+                exit 1
+            else
+                PKCS=$OPTARG
+            fi
             ;;
         q)  QUIET="yes"
             ;;
@@ -90,7 +100,8 @@ fi
 
 # Check minimum options
 if [[ -z $CN ]] && [[ -z $SEND ]]; then
-    echo "ERROR: Minimum requirement not met. At least one of these options must be given: -c or -s."
+    printf "ERROR: Minimum requirement not met. At least one of these options must be given: -c or -s.\n\n"
+    show_help >&2
     exit 1
 fi
 
@@ -105,7 +116,7 @@ elif [[ -f "$@" ]]; then
 elif [[ -f "${CNF_PATH}/$@" ]]; then
     CNF="${CNF_PATH}/$@"
     #echo "Config file found: $CNF"
-else    
+else
     echo "ERROR: config file not found: $@"
     show_help >&2
     exit 1
@@ -120,6 +131,7 @@ fi
 # Set defaults in case not parsed or missing from config
 : ${SEND:="no"}
 : ${ALL:="no"}
+: ${PKCS:="no"}
 : ${BODY_HEADER:="Dear recipient,\n\nPlease replace the following certificates:\n"}
 : ${BODY_FOOTER:="\n-- \nRegards,\n$(hostname)"}
 : ${SENDER:="cert_email.sh <$(id -un)@$(hostname)>"}
@@ -167,7 +179,13 @@ if [[ -n $CN ]] && [[ "$SEND" == "yes" ]]; then
     fi
     # Zip certificate
     rm -f "/tmp/${CN}.zip" # Ensure the zip file is empty
-    zip -q -j "/tmp/${CN}.zip" "$CRT_FILE"
+    if [[ "$PKCS" == "no" ]]; then
+        zip -q -j "/tmp/${CN}.zip" "$CRT_FILE"
+    else
+        openssl pkcs12 -export -out "/tmp/${CN}.p12" -in "$CRT_FILE" -inkey "/etc/ssl/private/${CN}.key" -password pass:"$PKCS"
+        zip -q -j "/tmp/${CN}.zip" "/tmp/${CN}.p12"
+        rm "/tmp/${CN}.p12" # Clean up
+    fi
     # Send email with attached zip file
     printf "$BODY_HEADER\n - $CN\n$BODY_FOOTER\n" | s-nail -a "/tmp/${CN}.zip" -s "$SUBJECT" -r "$SENDER" "${SEND_TO[@]}"
     rm "/tmp/${CN}.zip" # Clean up
@@ -199,27 +217,38 @@ elif [[ "$SEND" == "yes" ]]; then
     fi
     SUBJECT="New certificates for devices"
     # Check if certificate files exist.
-    ZIP_FILES=()
+    SEND_FILES=()
     SEND_CN=()
     for cn in ${RENEWED[@]}; do
         CRT_FILE="${CERT_PATH}/${cn}.crt"
         if [[ ! -f "$CRT_FILE" ]]; then
             printf 'WARNING: Certificate file not found: %s. Not including in email.\n' "$CRT_FILE"
         else
-            ZIP_FILES+=($CRT_FILE)
+            if [[ "$PKCS" == "no" ]]; then
+                # If pem files are wanted
+                SEND_FILES+=($CRT_FILE)
+            else
+                # If PKCS12 files are wanted
+                openssl pkcs12 -export -out "/tmp/${cn}.p12" -in "$CRT_FILE" -inkey "/etc/ssl/private/${cn}.key" -p "$PKCS"
+                SEND_FILES+="/tmp/${cn}.p12"
+            fi
             SEND_CN+=($cn)
         fi
     done
     # Zip certificates
-    if [ ${#ZIP_FILES[@]} -eq 0 ]; then
+    if [ ${#SEND_FILES[@]} -eq 0 ]; then
         printf 'ERROR: No certificate files found to send, aborting.\n'
         exit 3
     fi
     rm -f "/tmp/cert_email.zip" # Ensure the zip file is empty
-    zip -q -j "/tmp/cert_email.zip" "${ZIP_FILES[@]}"
+    zip -q -j "/tmp/cert_email.zip" "${SEND_FILES[@]}"
     # Send email with attached zip file
     (printf "$BODY_HEADER\n"; printf ' - %s\n' "${SEND_CN[@]}"; printf "\n$BODY_FOOTER\n") | s-nail -a "/tmp/cert_email.zip" -s "$SUBJECT" -r "$SENDER" "${SEND_TO[@]}"
-    rm "/tmp/cert_email.zip" # Clean up
+    # Clean up
+    rm "/tmp/cert_email.zip"
+    if [[ "$PKCS" != "no" ]]; then
+        rm "/tmp/${CN}.p12"
+    fi
     # Empty the RENEWED array in the config file
     sed -i -E 's/^\w*RENEWED=(.+)\w*$/RENEWED=()/g' "$CNF"
     printf 'SUCCESS: Email sent to: %s\nContaining these certificates:\n' "$(printf "'%s' " "${SEND_TO[@]}")"
