@@ -229,7 +229,7 @@ elif [[ "$SEND" == "yes" ]]; then
                 SEND_FILES+=($CRT_FILE)
             else
                 # If PKCS12 files are wanted
-                openssl pkcs12 -export -out "/tmp/${cn}.p12" -in "$CRT_FILE" -inkey "/etc/ssl/private/${cn}.key" -p "$PKCS"
+                openssl pkcs12 -export -out "/tmp/${cn}.p12" -in "$CRT_FILE" -inkey "/etc/ssl/private/${cn}.key" -password pass:"$PKCS"
                 SEND_FILES+="/tmp/${cn}.p12"
             fi
             SEND_CN+=($cn)
@@ -247,7 +247,9 @@ elif [[ "$SEND" == "yes" ]]; then
     # Clean up
     rm "/tmp/cert_email.zip"
     if [[ "$PKCS" != "no" ]]; then
-        rm "/tmp/${CN}.p12"
+        for cn in ${SEND_CN[@]}; do
+            rm "/tmp/${cn}.p12"
+        done
     fi
     # Empty the RENEWED array in the config file
     sed -i -E 's/^\w*RENEWED=(.+)\w*$/RENEWED=()/g' "$CNF"
