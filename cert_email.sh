@@ -149,7 +149,7 @@ if [[ "$SEND" == "yes" ]]; then
         addr=$(echo "${TO[$i]}" | cut -d "<" -f2 | cut -d ">" -f1)
         if [[ "$addr" =~ ^.+@.+\.[[:alpha:]]{2,}$ ]]; then
             # Test if the domain has an MX record
-            if host -t MX ${addr##*@} &> /dev/null; then
+            if host -t MX "${addr##*@}" </dev/null &>/dev/null; then
                 # An MX record is found, use it.
                 SEND_TO+=($addr)
             else
